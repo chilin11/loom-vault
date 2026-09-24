@@ -1,71 +1,79 @@
 # Loom · 密语
 
-离线优先的 Android 手动密码笔记：手动新增、编辑、搜索密码；手机本地加密保存；支持加密文件导入/导出和可选的自建服务端密文同步。桌面小组件只提供快速新增入口，不显示秘密。
+离线优先的 Android 手动密码笔记，支持本地加密保存、加密备份、私有云端密文同步和桌面快速新增。
 
-## 安装与使用
+## Android
 
-- 调试 APK：`app/build/outputs/apk/debug/app-debug.apk`（debug 签名，仅供自用试装）。
-- 构建：安装 JDK 17、Android SDK 35 和 Gradle，运行 `ANDROID_HOME=你的SDK目录 gradle :app:assembleDebug`。最低 Android 8.0。
-- 创建并保管**主密码**；服务端不知道主密码，忘记后无法恢复。登录密码用于账号验证，应与主密码不同。
-- 新增/编辑要点「加密保存」；离开或切到后台会丢失尚未保存的草稿。工具箱可导出 `.vault.json` 加密备份；请定期备份，勿将此试用版作为唯一密码副本。
-- 长按 Android 桌面空白处 → 小组件 → Loom · 密语 → 快速新建；未解锁时仍需要主密码。
+调试 APK 构建：`ANDROID_HOME=你的SDK目录 gradle :app:assembleDebug`（JDK 17、SDK 35；最低 Android 8.0）。主密码**不会上传**，忘记后服务端无法恢复；请定期从 App 工具箱导出加密备份。新增或编辑要点「加密保存」，切后台会丢失未保存草稿。
 
-## VPS 服务端：简易部署（Ubuntu/Debian + systemd）
+## VPS：Git 克隆 + 固定端口部署
 
-服务端只需要 Node.js 18+，**不需要数据库安装或 `npm install`**。安装脚本会从 31847–31947 自动选择第一个未监听的端口，**不会停止占用端口的其他程序**；新建独立低权限账号、数据目录并设置开机自启。它只监听 VPS 的 `127.0.0.1`，无需对外开放任何应用端口。**cloudflared 必须在同一台 VPS 的主机网络环境运行**；若它运行在 Docker 桥接网络里，容器内的 `127.0.0.1` 指向容器自身，不能直接使用本方案的 URL。
+服务端只需 **Node.js 18+、Git、curl 和 iproute2（`ss`）**，不需 `npm install` 或数据库安装。固定监听 **`127.0.0.1:31847`**；端口已被其他进程占用时脚本会**报错停止，不会改端口或停止别的服务**。cloudflared 必须运行在这台 VPS 的主机网络环境；Docker 桥接网络中的 `127.0.0.1` 指向容器自身，不能直接使用下面的地址。
 
-### 第 1 步：把两个文件传到 VPS
+### 1. 给 VPS 配置此私有 GitHub 仓库的只读权限
 
-在你**自己的电脑**上，从本仓库目录运行（把 `你的用户@VPS地址` 换成真实 SSH 地址）：
+以日常 SSH 用户登录 VPS（下方**不要**使用 root，也不要把私钥发给别人），生成专用密钥：
 
 ```sh
-scp server/server.js server/install.sh 你的用户@VPS地址:/tmp/
+mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+ssh-keygen -t ed25519 -f ~/.ssh/loom-vault-github -N ''
+cat ~/.ssh/loom-vault-github.pub
 ```
 
-如果你的 SSH 登录用户没有 `/tmp/` 写权限，可换用该用户的家目录，再在 VPS 上按实际文件路径运行。**只需要传这两个文件**，无需在 VPS 上配置 GitHub 私有仓库 Deploy Key。未来更新同样传文件并重新运行安装脚本，原数据文件不会覆盖。
+复制 `.pub` 的整行公钥，打开 [仓库 Settings → Deploy keys](https://github.com/chilin11/loom-vault/settings/keys) → **Add deploy key**，粘贴公钥，**不要勾选 Allow write access**。私钥 `~/.ssh/loom-vault-github` 留在 VPS，不能上传。
 
-### 第 2 步：在 VPS 上运行安装脚本
-
-SSH 登录 VPS，确认 Node 版本 `node --version` ≥ 18。若未安装，请先安装发行版提供的 Node.js 18+ 和 `curl`、`iproute2`（分别提供 `curl` 和 `ss` 命令）。然后运行：
+配置仅这个仓库使用专用密钥（不改变你其他 Git 仓库的 SSH 设置）：
 
 ```sh
-sudo bash /tmp/install.sh
+GIT_SSH_COMMAND="ssh -i $HOME/.ssh/loom-vault-github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" git clone git@github.com:chilin11/loom-vault.git "$HOME/loom-vault"
 ```
 
-脚本会先检查原有的 `loom-vault.service`，**不会覆盖来源不明的同名 systemd 服务**。新安装自动跳过已占用端口；重复安装沿用原端口。安装成功时会打印类似：
+如果已有 `~/loom-vault` 目录，不要再次克隆；请先确认它是否是此前克隆的本仓库，再按下文更新步骤执行 `git pull`。
+
+### 2. 检查固定端口并一键安装
+
+```sh
+node --version
+sudo ss -ltnp 'sport = :31847'
+sudo bash ~/loom-vault/server/install.sh
+```
+
+Node 须为 18+，建议通过系统包安装，使独立服务账号也能运行。`ss` 有输出且不是此前安装的 `loom-vault` 服务时，**不要**运行安装脚本或关停未知服务；需要先自行处理占用。安装脚本也会自行检查端口、同名 systemd 服务与原有数据配置，遇到不一致就退出。安装成功时打印：
 
 ```text
 Cloudflare Tunnel → Public Hostname → Service type: HTTP；URL: 127.0.0.1:31847
 ```
 
-**以脚本实际打印的端口为准**，不要盲用 31847。若提示端口冲突或启动失败，检查：
+验证本机 API：
 
 ```sh
-sudo ss -ltnp
-sudo journalctl -u loom-vault -n 60 --no-pager
-sudo systemctl status loom-vault --no-pager
+curl -i http://127.0.0.1:31847/api/vault
 ```
 
-本机连通性测试：`curl -i http://127.0.0.1:实际端口/api/vault`，预期 `401`（未带登录令牌，这是正常响应）。**不要在 VPS 防火墙或云安全组开放这个端口**。
+返回 HTTP `401` 表示服务可访问，只是没有登录令牌。应用端口**不需对公网开放**。
 
-### 第 3 步：Cloudflare Tunnel 和手机
+### 3. 接上 cloudflared
 
-在 Cloudflare Zero Trust 的 Tunnel → Public Hostname 配置你自己的域名，例如 `vault.example.com`；**Service type = HTTP**、**URL = `127.0.0.1:实际端口`**（端口来自安装脚本输出）。HTTPS 由 Cloudflare 对外提供；cloudflared 在 VPS 内访问本地 HTTP。外部用 `https://vault.example.com/api/vault` 测试也应返回 `401`。
+在 Cloudflare Tunnel 的 Public Hostname 配域名，例如 `vault.example.com`；Service type 选 **HTTP**，URL 固定填 **`127.0.0.1:31847`**。通过公网访问 `https://vault.example.com/api/vault` 应返回 `401`。App 工具箱中的服务器地址只填写 **`https://vault.example.com`**，不要加 `/api` 或端口，也不要填 HTTP/IP。
 
-在 APK 的工具箱中，服务器地址填 **`https://vault.example.com`**，不要填 `/api`，也不要填 VPS IP、本地端口或 `http://`。注册或登录后添加一条测试记录并「立即同步」。换机后通过同一账号登录，使用原主密码解密恢复。
+### 更新和备份
 
-### 数据、升级与限制
-
-- 数据存于 `/var/lib/loom-vault/data.json`，不在源码目录；**请定期将其备份到另一台设备**，备份仍含敏感账号哈希和密文。手机端也要导出加密备份。
-- 本服务适合单台小型 VPS 的**单实例**运行，不得让多个进程同时写一个 JSON 数据文件。服务端重启后账号登录会话会失效，需要重新登录；手机离线使用不受影响。
-- 检查服务：`sudo systemctl status loom-vault --no-pager`；查看日志：`sudo journalctl -u loom-vault -n 60 --no-pager`；更新程序：从电脑重新 `scp` 两个文件，再 `sudo bash /tmp/install.sh`。端口保持不变，无须修改 Tunnel。
-- Cloudflare Tunnel 的访问/速率限制、VPS 安全更新和外部备份仍需自行配置。没有进行过专业安全审计，勿用作唯一密码副本。
-
-## 开发验证
+在 VPS 执行（仍用上面同一个只读 SSH 密钥）：
 
 ```sh
+cd ~/loom-vault
+GIT_SSH_COMMAND="ssh -i $HOME/.ssh/loom-vault-github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" git pull --ff-only
+sudo bash server/install.sh
+```
+
+重复安装**仍用 31847**，并保留 `/var/lib/loom-vault/data.json`；如果现有配置不一致则拒绝覆盖。定期将该数据文件备份到别处，它包含账号密码哈希和加密保险库。服务端仅支持单实例；重启会令登录会话失效，需重新登录。故障时检查 `sudo journalctl -u loom-vault -n 60 --no-pager` 与 `sudo systemctl status loom-vault --no-pager`。
+
+## 验证与说明
+
+```sh
+bash -n server/install.sh
 node --test server/test/*.test.js
 ANDROID_HOME=你的SDK目录 gradle :app:assembleDebug
 ```
 
-API 为 `POST /api/register`、`POST /api/login`、Bearer 保护的 `GET/PUT /api/vault`；PUT 用修订号 compare-and-swap，冲突返回 `409`。服务器只存加密 vault 字符串，不知道主密码。测试覆盖注册登录、鉴权、冲突、持久化和无效请求。
+服务端提供 `POST /api/register`、`POST /api/login`、Bearer 保护的 `GET/PUT /api/vault`；仅保存密文和版本号，更新遇到版本冲突返回 `409`。本项目尚未通过 VPS 实机部署测试或专业安全审计，请勿将其作为密码的唯一副本。

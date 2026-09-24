@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on an Ubuntu/Debian VPS: sudo bash /tmp/install.sh (server.js in the same directory).
+# 从已克隆的私有仓库运行：sudo bash ~/loom-vault/server/install.sh
 set -euo pipefail
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || fail '请使用 sudo bash install.sh 运行'
@@ -28,25 +28,19 @@ elif [[ -e $SERVICE_FILE ]]; then
 fi
 
 port_used() { [[ -n "$(ss -H -ltn "sport = :$1")" ]]; }
-PORT=''
+PORT=31847
 if [[ -f $CONFIG_FILE ]]; then
-  # Existing config is intentionally immutable on update, to avoid switching databases.
-  grep -Fqx 'HOST=127.0.0.1' "$CONFIG_FILE" || fail '现有配置 HOST 不是 127.0.0.1；请先人工检查'
-  grep -Fqx "DATA_FILE=$DATA_DIR/data.json" "$CONFIG_FILE" || fail '现有 DATA_FILE 不匹配；拒绝覆盖旧数据配置'
-  PORT="$(awk -F= '$1=="PORT"{print $2}' "$CONFIG_FILE")"
-  [[ $PORT =~ ^[0-9]{1,5}$ ]] && (( 10#$PORT > 0 && 10#$PORT < 65536 )) || fail '现有端口无效'
-  if port_used "$PORT"; then
-    pid="$(systemctl show loom-vault.service -p MainPID --value 2>/dev/null || true)"
-    [[ $pid =~ ^[1-9][0-9]*$ ]] || fail "端口 $PORT 已占用，但服务进程未知；拒绝重装"
-    listener="$(ss -H -ltnp "sport = :$PORT")"
-    [[ $listener == *"pid=$pid,"* ]] || fail "端口 $PORT 并非本服务占用；拒绝重装"
-  fi
+  # 重装只接受本脚本生成的三行配置；重复键或未知键一律拒绝，避免 systemd 读取到不同的有效值。
+  mapfile -t config_lines < "$CONFIG_FILE"
+  [[ ${#config_lines[@]} -eq 3 && ${config_lines[0]} == 'HOST=127.0.0.1' && ${config_lines[1]} == "PORT=$PORT" && ${config_lines[2]} == "DATA_FILE=$DATA_DIR/data.json" ]] || fail '已有服务配置与固定端口/数据路径不一致，拒绝覆盖，请人工检查'
 else
-  [[ $unit_state == not-found || -z $unit_state ]] || fail '已有服务但没有配置文件；拒绝接管'
-  for candidate in $(seq 31847 31947); do
-    if ! port_used "$candidate"; then PORT=$candidate; break; fi
-  done
-  [[ -n $PORT ]] || fail '31847–31947 全部被占用；不会停止任何现有服务'
+  [[ $unit_state == not-found || -z $unit_state ]] || fail '已有服务但没有配置文件，拒绝接管'
+fi
+if port_used "$PORT"; then
+  pid="$(systemctl show loom-vault.service -p MainPID --value 2>/dev/null || true)"
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || fail "固定端口 $PORT 已被其他进程占用；请用 sudo ss -ltnp 'sport = :$PORT' 检查，不会停止它"
+  listener="$(ss -H -ltnp "sport = :$PORT")"
+  [[ $listener == *"pid=$pid,"* ]] || fail "固定端口 $PORT 不是本服务占用，拒绝重装"
 fi
 
 if ! id -u loom-vault >/dev/null 2>&1; then
