@@ -43,7 +43,18 @@ sudo install -d -o loom-vault -g loom-vault -m 700 /var/lib/loom-vault
 sudo install -d -o root -g root -m 755 /etc/loom-vault
 ```
 
-将这个私有 GitHub 仓库的只读 Deploy Key 配置给 VPS 后，检出源码（不要把有写权限的个人 GitHub Token 放进服务器命令历史）：
+为只读检出配置仓库 Deploy Key：在 VPS 上生成专用 SSH key，并将 `.pub` 公钥添加到 GitHub 仓库 `Settings → Deploy keys → Add deploy key`；不要勾选写权限。私钥仅留在 VPS：
+```sh
+sudo install -d -o loom-vault -g loom-vault -m 700 /opt/loom-vault/.ssh
+sudo -u loom-vault ssh-keygen -t ed25519 -N '' -f /opt/loom-vault/.ssh/id_ed25519
+sudo cat /opt/loom-vault/.ssh/id_ed25519.pub
+```
+把公钥粘贴到 Deploy keys 后，用该只读 key 克隆：
+```sh
+sudo -u loom-vault env GIT_SSH_COMMAND='ssh -i /opt/loom-vault/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' git clone --depth 1 git@github.com:chilin11/loom-vault.git /opt/loom-vault/app
+```
+
+不要复制或在 VPS 命令行中输入个人 GitHub Token；Deploy Key 只授权此私有仓库。若不想配置 Deploy Key，也可用自己电脑的安全 SSH/SCP 把 `server/` 目录传到 VPS。
 
 ```sh
 sudo -u loom-vault git clone --depth 1 git@github.com:chilin11/loom-vault.git /opt/loom-vault/app
