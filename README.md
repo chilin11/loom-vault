@@ -4,7 +4,7 @@
 
 ## Android
 
-调试 APK 构建：`ANDROID_HOME=你的SDK目录 gradle :app:assembleDebug`（JDK 17、SDK 35；最低 Android 8.0）。主密码**不会上传**，忘记后服务端无法恢复；请定期从 App 工具箱导出加密备份。新增或编辑要点「加密保存」，切后台会丢失未保存草稿。
+调试 APK 构建：`ANDROID_HOME=你的SDK目录 gradle :app:assembleDebug`（JDK 17、SDK 35；最低 Android 8.0）。新增记录默认只需填**网站/名称别名和密码**；账号可选，分类、网址、备注点「更多信息」再填。主密码**不会上传**，忘记后服务端无法恢复；请定期从 App 工具箱导出加密备份。新增或编辑要点「加密保存」，切后台会丢失未保存草稿。
 
 ## VPS：Git 克隆 + 固定端口部署
 

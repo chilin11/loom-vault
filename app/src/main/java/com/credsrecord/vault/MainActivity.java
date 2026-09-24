@@ -80,7 +80,96 @@ public class MainActivity extends Activity {
         item("账号",obj.optString("username"),true,false);item("密码",obj.optString("password"),true,true);item("网址 / 应用",obj.optString("url"),false,false);item("备注",obj.optString("notes"),false,false);gap(page,12);TextView edit=action("编辑记录",true);add(page,edit,-1,-2);edit.setOnClickListener(v->editDialog(index));gap(page,12);TextView del=action("删除记录",false);del.setTextColor(WARM);add(page,del,-1,-2);del.setOnClickListener(v->dialogBuilder().setTitle("删除这条记录？").setMessage("删除后会保存到本地保险库；如已登录，同步时也将删除云端副本。此操作不可撤销。").setNegativeButton("取消",null).setPositiveButton("删除",(d,w)->{JSONArray next=new JSONArray();for(int i=0;i<entries.length();i++)if(i!=index)next.put(entries.optJSONObject(i));commit(next,()->showHome(""));}).show());}
     private void item(String heading,String value,boolean canCopy,boolean secret){LinearLayout card=column();card.setBackground(outlined(PANEL,18));pad(card,18,16,18,16);add(card,text(heading,13,MUTED,true),-1,-2);gap(card,10);TextView content=text(value.isEmpty()?"未填写":secret?"••••••••••••":value,17,value.isEmpty()?MUTED:TEXT,false);content.setTextIsSelectable(!secret);if(secret)content.setTypeface(Typeface.MONOSPACE);add(card,content,-1,-2);if(!value.isEmpty()&&(secret||canCopy)){gap(card,12);LinearLayout controls=row();if(secret){final boolean[] visible={false};TextView reveal=action("显示密码",false);add(controls,reveal,-2,-2);reveal.setOnClickListener(v->{if(master==null)return;visible[0]=!visible[0];content.setText(visible[0]?value:"••••••••••••");reveal.setText(visible[0]?"隐藏密码":"显示密码");});}if(canCopy){TextView copy=action("复制"+heading,false);controls.addView(copy,margins(-2,-2,secret?8:0,0,0,0));copy.setOnClickListener(v->{if(master!=null)copy(value,secret);});}add(card,controls,-1,-2);}page.addView(card,margins(-1,-2,0,0,0,12));}
     private void copy(String value,boolean secret){android.content.ClipboardManager cb=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cb.setPrimaryClip(ClipData.newPlainText(secret?"密码":"账号",value));toast("已复制，60 秒后尝试清除剪贴板");main.postDelayed(()->{if(cb.hasPrimaryClip() && cb.getPrimaryClip().getItemCount()>0 && value.equals(cb.getPrimaryClip().getItemAt(0).coerceToText(this).toString()))cb.setPrimaryClip(ClipData.newPlainText("",""));},60000);}
-    private void editDialog(int index){if(master==null){pendingQuickAdd=index<0;showGate();return;}if(saving){toast("请等待上一条记录保存完成");return;}JSONObject old=index<0?new JSONObject():entries.optJSONObject(index);if(old==null)return;ScrollView scroll=new ScrollView(this);LinearLayout form=column();pad(form,24,16,24,12);scroll.addView(form);add(form,text("只需填写名称，其余可稍后补充。",14,MUTED,false),-1,-2);gap(form,20);String[] labels={"名称 · 必填","分类","账号 / 用户名","密码 / 密钥","网址 / 应用","备注"};String[] hints={"例如：我的邮箱","例如：工作、生活","输入账号或邮箱","输入密码或密钥","https:// 或应用名称","添加需要记住的细节"};String[] keys={"title","category","username","password","url","notes"};EditText[] inputs=new EditText[keys.length];for(int i=0;i<keys.length;i++){label(form,labels[i]);inputs[i]=field(hints[i],old.optString(keys[i]),i==3);inputs[i].setContentDescription(labels[i]);if(i==2)inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);if(i==4)inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);if(i==5){inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);inputs[i].setSingleLine(false);inputs[i].setMinLines(3);inputs[i].setGravity(Gravity.TOP);}add(form,inputs[i],-1,-2);gap(form,18);}AlertDialog dialog=dialogBuilder().setTitle(index<0?"新建记录":"编辑记录").setView(scroll).setNegativeButton("取消",null).setPositiveButton("加密保存",null).create();dialog.setOnShowListener(d->{dialog.getWindow().setBackgroundDrawable(outlined(BG,24));dialog.getButton(-1).setTextColor(ACCENT);dialog.getButton(-2).setTextColor(MUTED);dialog.getButton(-1).setOnClickListener(v->{if(master==null){dialog.dismiss();return;}if(saving){toast("请等待保存完成");return;}if(inputs[0].getText().toString().trim().isEmpty()){inputs[0].setError("请填写名称");inputs[0].requestFocus();return;}try{JSONObject item=new JSONObject();item.put("id",index<0?UUID.randomUUID().toString():old.optString("id",UUID.randomUUID().toString()));for(int i=0;i<keys.length;i++)item.put(keys[i],i==3?inputs[i].getText().toString():inputs[i].getText().toString().trim());item.put("updatedAt",System.currentTimeMillis());JSONArray next=new JSONArray();for(int i=0;i<entries.length();i++)next.put(i==index?item:entries.getJSONObject(i));if(index<0)next.put(item);commit(next,()->{dialog.dismiss();showHome("");});}catch(Exception ex){toast("保存失败："+ex.getMessage());}});});dialog.show();}
+    private void editDialog(int index){
+        if(master==null){pendingQuickAdd=index<0;showGate();return;}
+        if(saving){toast("请等待上一条记录保存完成");return;}
+        JSONObject old=index<0?new JSONObject():entries.optJSONObject(index);
+        if(old==null)return;
+        ScrollView scroll=new ScrollView(this);
+        LinearLayout form=column();
+        pad(form,24,12,24,12);scroll.addView(form);
+        add(form,text("记下网站别名和密码，即可加密保存。\n仅名称必填；账号和更多信息可稍后补充。",13,MUTED,false),-1,-2);
+        gap(form,16);
+        String[] keys={"title","password","username","category","url","notes"};
+        String[] labels={"名称 / 网站别名 · 必填","密码","账号 · 选填","分类 · 选填","网址 / 应用 · 选填","备注 · 选填"};
+        String[] hints={"例如：常用邮箱、购物网站","输入密码，也可留空","用户名、邮箱或手机号","例如：工作、生活","https:// 或应用名称","添加需要记住的细节"};
+        EditText[] inputs=new EditText[keys.length];
+        String[] initial=new String[keys.length];
+        LinearLayout extras=column();
+        TextView more=action("更多信息  ▾",false);
+        boolean hasExtras=false;
+        for(int i=3;i<keys.length;i++)hasExtras|=!old.optString(keys[i],"").isEmpty();
+        extras.setVisibility(hasExtras?View.VISIBLE:View.GONE);
+        more.setText(hasExtras?"收起更多信息  ▴":"更多信息  ▾");
+        more.setContentDescription(hasExtras?"更多信息，已展开，点击收起":"更多信息，已折叠，点击填写分类、网址或备注");
+        for(int i=0;i<keys.length;i++){
+            if(i==3){add(form,more,-1,-2);add(form,extras,-1,-2);gap(extras,14);}
+            LinearLayout parent=i<3?form:extras;
+            label(parent,labels[i]);
+            initial[i]=old.optString(keys[i],"");
+            inputs[i]=field(hints[i],initial[i],i==1);
+            inputs[i].setId(View.generateViewId());
+            inputs[i].setContentDescription(labels[i]);
+            if(i==2)inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+            if(i==4)inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);
+            inputs[i].setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI|android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING|(i==0||i==1||i==3||i==4?android.view.inputmethod.EditorInfo.IME_ACTION_NEXT:android.view.inputmethod.EditorInfo.IME_ACTION_DONE));
+            if(i==5){
+                inputs[i].setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                inputs[i].setSingleLine(false);inputs[i].setMinLines(3);inputs[i].setGravity(Gravity.TOP);
+                inputs[i].setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI|android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+            }
+            add(parent,inputs[i],-1,-2);gap(parent,12);
+        }
+        inputs[0].setNextFocusForwardId(inputs[1].getId());inputs[1].setNextFocusForwardId(inputs[2].getId());
+        inputs[3].setNextFocusForwardId(inputs[4].getId());
+        inputs[4].setNextFocusForwardId(inputs[5].getId());
+        more.setOnClickListener(v->{
+            boolean expand=extras.getVisibility()!=View.VISIBLE;
+            if(!expand&&extras.hasFocus())more.requestFocus();
+            extras.setVisibility(expand?View.VISIBLE:View.GONE);
+            more.setText(expand?"收起更多信息  ▴":"更多信息  ▾");
+            more.setContentDescription(expand?"更多信息，已展开，点击收起":"更多信息，已折叠，点击填写分类、网址或备注");
+        });
+        AlertDialog dialog=dialogBuilder().setTitle(index<0?"新建记录":"编辑记录").setView(scroll).setNegativeButton("取消",null).setPositiveButton("加密保存",null).create();
+        dialog.setOnShowListener(d->{
+            dialog.getWindow().setBackgroundDrawable(outlined(BG,24));
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            dialog.getButton(-1).setTextColor(ACCENT);dialog.getButton(-2).setTextColor(MUTED);
+            dialog.getButton(-1).setOnClickListener(v->{
+                if(master==null){dialog.dismiss();return;}
+                if(saving){toast("请等待保存完成");return;}
+                if(inputs[0].getText().toString().trim().isEmpty()){
+                    inputs[0].setError("请填写名称或网站别名");inputs[0].requestFocus();return;
+                }
+                try{
+                    // Clone rather than rebuild: retain metadata and fields unknown to this form.
+                    JSONObject item=new JSONObject(old.toString());
+                    if(index<0){item.put("id",UUID.randomUUID().toString());item.put("updatedAt",System.currentTimeMillis());}
+                    for(int i=0;i<keys.length;i++){
+                        String value=inputs[i].getText().toString();
+                        // Untouched values (including absent/null keys) must survive an edit verbatim.
+                        if(index<0||!value.equals(initial[i]))item.put(keys[i],i==0?value.trim():value);
+                    }
+                    JSONArray next=new JSONArray();
+                    for(int i=0;i<entries.length();i++)next.put(i==index?item:entries.getJSONObject(i));
+                    if(index<0)next.put(item);
+                    commit(next,()->{dialog.dismiss();showHome("");});
+                }catch(Exception ex){toast("保存失败："+ex.getMessage());}
+            });
+            inputs[2].setOnEditorActionListener((view,actionId,event)->{
+                if(actionId==android.view.inputmethod.EditorInfo.IME_ACTION_DONE){
+                    ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(view.getWindowToken(),0);
+                    return true;
+                }
+                return false;
+            });
+        });
+        dialog.show();
+        if(index<0){
+            inputs[0].requestFocus();
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
+    }
     private void commit(JSONArray next,Runnable after){String current=master;if(current==null||saving){toast("请先解锁或等待保存完成");return;}saving=true;io.execute(()->{try{store.save(current,new JSONObject().put("entries",next));runOnUiThread(()->{saving=false;dirty=true;if(master!=null && master.equals(current)){entries=next;after.run();toast("已加密保存到本机");if(token!=null&&!reconciliationPending)sync(false);}});}catch(Exception e){runOnUiThread(()->{saving=false;toast("保存失败："+e.getMessage());});}});}
     private void tools(){String state=token==null?"未登录":"已登录 · 可同步";dialogBuilder().setTitle("工具箱  /  " +state).setItems(new String[]{"☁  登录 / 注册与同步","↻  立即同步","⇧  导出加密备份","⇩  导入加密备份","◯  锁定保险库"},(d,which)->{switch(which){case 0:accountDialog(false);break;case 1:sync(true);break;case 2:exportFile();break;case 3:pickImport();break;case 4:token=null;master=null;showGate();break;}}).show();}
     private void accountDialog(boolean recovery){if(!foreground||isDestroyed())return;LinearLayout form=column();pad(form,20,8,20,4);label(form,"服务器地址（生产环境必须 HTTPS）");EditText url=field("https://your-server.example",getPreferences(0).getString("serverUrl",""),false);add(form,url,-1,50);gap(form,13);label(form,"账号");EditText user=field("输入用户名","",false);add(form,user,-1,50);gap(form,13);label(form,"登录密码（不是主密码）");EditText pass=field("输入登录密码","",true);add(form,pass,-1,50);gap(form,15);add(form,text("登录密码用于身份验证；主密码只用于解密，服务器无法读取内容。",12,MUTED,false),-1,-2);ScrollView scroll=new ScrollView(this);scroll.addView(form);dialogBuilder().setTitle(recovery?"从账号恢复":"账号与云同步").setView(scroll).setNegativeButton("取消",null).setNeutralButton("注册",(d,w)->authenticate(url.getText().toString(),user.getText().toString(),pass.getText().toString(),true,recovery)).setPositiveButton("登录",(d,w)->authenticate(url.getText().toString(),user.getText().toString(),pass.getText().toString(),false,recovery)).show();}
