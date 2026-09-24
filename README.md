@@ -10,25 +10,17 @@
 
 服务端只需 **Node.js 18+、Git、curl 和 iproute2（`ss`）**，不需 `npm install` 或数据库安装。固定监听 **`127.0.0.1:31847`**；端口已被其他进程占用时脚本会**报错停止，不会改端口或停止别的服务**。cloudflared 必须运行在这台 VPS 的主机网络环境；Docker 桥接网络中的 `127.0.0.1` 指向容器自身，不能直接使用下面的地址。
 
-### 1. 给 VPS 配置此私有 GitHub 仓库的只读权限
+### 1. 用已有 GitHub Token 克隆私有仓库
 
-以日常 SSH 用户登录 VPS（下方**不要**使用 root，也不要把私钥发给别人），生成专用密钥：
-
-```sh
-mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-ssh-keygen -t ed25519 -f ~/.ssh/loom-vault-github -N ''
-cat ~/.ssh/loom-vault-github.pub
-```
-
-复制 `.pub` 的整行公钥，打开 [仓库 Settings → Deploy keys](https://github.com/chilin11/loom-vault/settings/keys) → **Add deploy key**，粘贴公钥，**不要勾选 Allow write access**。私钥 `~/.ssh/loom-vault-github` 留在 VPS，不能上传。
-
-配置仅这个仓库使用专用密钥（不改变你其他 Git 仓库的 SSH 设置）：
+以平时登录 VPS 的普通用户运行（无需生成 SSH Key，也无需配置 Deploy Key）：
 
 ```sh
-GIT_SSH_COMMAND="ssh -i $HOME/.ssh/loom-vault-github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" git clone git@github.com:chilin11/loom-vault.git "$HOME/loom-vault"
+git -c credential.helper= clone https://github.com/chilin11/loom-vault.git "$HOME/loom-vault"
 ```
 
-如果已有 `~/loom-vault` 目录，不要再次克隆；请先确认它是否是此前克隆的本仓库，再按下文更新步骤执行 `git pull`。
+Git 提示 `Username for 'https://github.com'` 时输入 `chilin11`；提示 `Password` 时粘贴你的 GitHub Token（输入时不会显示）。Token 必须有读取该私有仓库的权限：fine-grained token 至少需该仓库的 **Contents: Read-only**；经典 PAT 需 `repo` 权限。**不要**把 Token 放进克隆 URL、命令行、截图或聊天。这里关闭此命令的凭据缓存，后续更新会再次提示输入；请自行安全保管 Token。
+
+如果 `~/loom-vault` 已存在，不要重复 clone；先用 `git -C "$HOME/loom-vault" remote -v` 确认它是此仓库，再按下方更新步骤操作。
 
 ### 2. 检查固定端口并一键安装
 
@@ -58,11 +50,11 @@ curl -i http://127.0.0.1:31847/api/vault
 
 ### 更新和备份
 
-在 VPS 执行（仍用上面同一个只读 SSH 密钥）：
+在 VPS 执行；`git pull` 如再次提示密码，继续粘贴 Token：
 
 ```sh
-cd ~/loom-vault
-GIT_SSH_COMMAND="ssh -i $HOME/.ssh/loom-vault-github -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" git pull --ff-only
+cd "$HOME/loom-vault"
+git -c credential.helper= pull --ff-only
 sudo bash server/install.sh
 ```
 
