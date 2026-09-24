@@ -281,7 +281,6 @@ public final class BiometricUnlock {
             key = generateKey();
             cipher.init(Cipher.ENCRYPT_MODE, key);
         }
-        cipher.updateAAD(AAD);
         return cipher;
     }
 
@@ -293,7 +292,6 @@ public final class BiometricUnlock {
         }
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, record.iv));
-        cipher.updateAAD(AAD);
         return cipher;
     }
 
@@ -524,12 +522,14 @@ public final class BiometricUnlock {
             byte[] cleartext = enrollmentBytes;
             try {
                 byte[] iv = authenticatedCipher.getIV();
+                authenticatedCipher.updateAAD(AAD);
                 byte[] ciphertext = authenticatedCipher.doFinal(cleartext);
                 writeRecord(activity, iv, ciphertext);
                 String passphrase = enrollmentPassphrase;
                 finish(passphrase, null, false);
             } catch (Exception e) {
                 finishError(errorMessage(e, true));
+                android.util.Log.e("LoomBiometric", "Enrollment failed after system authentication", e);
             } finally {
                 wipe(enrollmentBytes);
                 enrollmentBytes = null;
@@ -539,11 +539,13 @@ public final class BiometricUnlock {
         private void finishUnlock(Cipher authenticatedCipher) {
             byte[] cleartext = null;
             try {
+                authenticatedCipher.updateAAD(AAD);
                 cleartext = authenticatedCipher.doFinal(readRecord(activityReference.get()).ciphertext);
                 String passphrase = decodePassphrase(cleartext);
                 finish(passphrase, null, false);
             } catch (Exception e) {
                 finishError(errorMessage(e, false));
+                android.util.Log.e("LoomBiometric", "Biometric unlock failed", e);
             } finally {
                 wipe(cleartext);
             }
