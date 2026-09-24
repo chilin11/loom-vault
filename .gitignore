@@ -1,0 +1,15 @@
+# Android / Gradle
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+
+# Runtime data: may contain account password hashes and encrypted vaults
+server/data.json
+server/data.json.*
+server/*.db
+*.log
+
+# Platform files
+.DS_Store
