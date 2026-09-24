@@ -163,17 +163,25 @@ public class MainActivity extends Activity {
                 inputs[i].setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI|android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
             }
             if(i==1){
-                LinearLayout passwordRow=row();passwordRow.addView(inputs[i],new LinearLayout.LayoutParams(0,-2,1));
-                TextView visibility=action("显示",false);visibility.setContentDescription("显示密码输入");
-                passwordRow.addView(visibility,margins(76,52,8,0,0,0));
-                visibility.setOnClickListener(v->{
+                FrameLayout passwordBox=new FrameLayout(this);passwordBox.setMinimumHeight(dp(52));
+                inputs[i].setPadding(dp(15),dp(12),dp(54),dp(12));
+                passwordBox.addView(inputs[i],new FrameLayout.LayoutParams(-1,-2));
+                ImageView eye=new ImageView(this);
+                eye.setImageResource(R.drawable.ic_visibility);
+                eye.setContentDescription("显示密码");
+                eye.setBackground(new RippleDrawable(tint(0x30C5E8A5),null,shape(Color.WHITE,24)));
+                eye.setPadding(dp(12),dp(12),dp(12),dp(12));
+                FrameLayout.LayoutParams eyeParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+                eyeParams.rightMargin=dp(4);passwordBox.addView(eye,eyeParams);
+                eye.setOnClickListener(v->{
                     boolean showing=inputs[1].getTransformationMethod() instanceof android.text.method.HideReturnsTransformationMethod;
                     int start=inputs[1].getSelectionStart(),end=inputs[1].getSelectionEnd();
                     inputs[1].setTransformationMethod(showing?android.text.method.PasswordTransformationMethod.getInstance():android.text.method.HideReturnsTransformationMethod.getInstance());
                     inputs[1].setSelection(Math.max(0,start),Math.max(0,end));
-                    visibility.setText(showing?"显示":"隐藏");visibility.setContentDescription(showing?"显示密码输入":"隐藏密码输入");
+                    eye.setImageResource(showing?R.drawable.ic_visibility:R.drawable.ic_visibility_off);
+                    eye.setContentDescription(showing?"显示密码":"隐藏密码");
                 });
-                add(parent,passwordRow,-1,-2);gap(parent,12);
+                add(parent,passwordBox,-1,-2);gap(parent,12);
             }else{add(parent,inputs[i],-1,-2);gap(parent,12);}
         }
         inputs[0].setNextFocusForwardId(inputs[1].getId());inputs[1].setNextFocusForwardId(inputs[2].getId());
