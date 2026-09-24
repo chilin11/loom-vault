@@ -23,9 +23,9 @@ import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
     private static final int BG=0xFF101A1D, PANEL=0xFF1A282C, BORDER=0xFF34474B, TEXT=0xFFF1F5F2, MUTED=0xFFACBEBB, ACCENT=0xFFC5E8A5, WARM=0xFFFFB4AB;
-    private static final String ADD_ENTRY="com.credsrecord.vault.ADD_ENTRY", PENDING_ADD="pendingQuickAdd";
-    private boolean pendingQuickAdd, foreground;
-    private int gateGeneration;
+    private static final String ADD_ENTRY="com.credsrecord.vault.ADD_ENTRY", PENDING_ADD="pendingQuickAdd", BIO_OFFER_DONE="biometricOfferDone";
+    private boolean pendingQuickAdd, foreground, autoBiometricAttempted, biometricInFlight;
+    private int gateGeneration, autoBiometricScheduledGeneration=-1;
     private static final java.util.concurrent.atomic.AtomicBoolean VAULT_WRITE_BUSY=new java.util.concurrent.atomic.AtomicBoolean(false);
     private final ArrayList<AlertDialog> dialogs=new ArrayList<>();
     private final ExecutorService io=Executors.newSingleThreadExecutor();
@@ -40,13 +40,13 @@ public class MainActivity extends Activity {
     private final int EXPORT=110, IMPORT=111;
 
     @Override public void onDestroy(){io.shutdown();super.onDestroy();}
-    @Override public void onCreate(Bundle b){setTheme(android.R.style.Theme_Material_NoActionBar);super.onCreate(b);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);getWindow().getDecorView().setSystemUiVisibility(0);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);store=new VaultStore(this);pendingQuickAdd=b!=null&&b.getBoolean(PENDING_ADD,false);if(b==null)consumeQuickAdd(getIntent());else if(getIntent()!=null)getIntent().setAction(null);showGate();}
-    @Override protected void onStart(){super.onStart();foreground=true;}
+    @Override public void onCreate(Bundle b){setTheme(android.R.style.Theme_Material_NoActionBar);super.onCreate(b);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);getWindow().getDecorView().setSystemUiVisibility(0);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);store=new VaultStore(this);pendingQuickAdd=b!=null&&b.getBoolean(PENDING_ADD,false);autoBiometricAttempted=b!=null&&b.getBoolean("bioAttempted",false);if(b==null)consumeQuickAdd(getIntent());else if(getIntent()!=null)getIntent().setAction(null);showGate();}
+    @Override protected void onStart(){super.onStart();foreground=true;scheduleAutoBiometric();}
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);consumeQuickAdd(intent);if(master==null)showGate();else openPendingAdd();}
-    @Override protected void onSaveInstanceState(Bundle state){state.putBoolean(PENDING_ADD,pendingQuickAdd);super.onSaveInstanceState(state);}
+    @Override protected void onSaveInstanceState(Bundle state){state.putBoolean(PENDING_ADD,pendingQuickAdd);state.putBoolean("bioAttempted",autoBiometricAttempted);super.onSaveInstanceState(state);}
     private void consumeQuickAdd(Intent intent){if(intent!=null&&ADD_ENTRY.equals(intent.getAction())){pendingQuickAdd=true;intent.setAction(null);}}
-    private void openPendingAdd(){if(master!=null&&pendingQuickAdd){pendingQuickAdd=false;editDialog(-1);}}
-    @Override protected void onStop(){foreground=false;gateGeneration++;BiometricUnlock.cancel(this);for(AlertDialog dialog:new ArrayList<>(dialogs))dialog.dismiss();dialogs.clear();super.onStop();if(master!=null)token=null;showGate();}
+    private void openPendingAdd(){if(master==null||!pendingQuickAdd)return;if(saving||VAULT_WRITE_BUSY.get()){main.postDelayed(()->{if(!isDestroyed()&&foreground&&master!=null&&pendingQuickAdd)openPendingAdd();},250);return;}pendingQuickAdd=false;editDialog(-1);}
+    @Override protected void onStop(){boolean wasUnlocked=master!=null;foreground=false;gateGeneration++;biometricInFlight=false;BiometricUnlock.cancel(this);for(AlertDialog dialog:new ArrayList<>(dialogs))dialog.dismiss();dialogs.clear();if(wasUnlocked){token=null;autoBiometricAttempted=false;}showGate();super.onStop();}
     private AlertDialog.Builder dialogBuilder(){return new AlertDialog.Builder(this){@Override public AlertDialog create(){AlertDialog dialog=super.create();if(dialog.getWindow()!=null)dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);dialogs.add(dialog);dialog.setOnDismissListener(d->dialogs.remove(dialog));return dialog;}};}
     private int dp(float n){return (int)(getResources().getDisplayMetrics().density*n+0.5f);}
     private GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -66,57 +66,38 @@ public class MainActivity extends Activity {
     private void surface(){ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);scroll.setBackgroundColor(BG);scroll.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets bars=Build.VERSION.SDK_INT>=30?insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()):null;int left=bars!=null?bars.left:insets.getSystemWindowInsetLeft(),right=bars!=null?bars.right:insets.getSystemWindowInsetRight(),top=bars!=null?bars.top:insets.getSystemWindowInsetTop(),bottom=bars!=null?Math.max(bars.bottom,insets.getInsets(WindowInsets.Type.ime()).bottom):insets.getSystemWindowInsetBottom();v.setPadding(left,top,right,bottom);return insets;});page=column();int side=Math.max(24,(int)(getResources().getConfiguration().screenWidthDp-600)/2);pad(page,side,24,side,32);scroll.addView(page);setContentView(scroll);scroll.requestApplyInsets();}
     private void header(LinearLayout box){LinearLayout brandRow=row();TextView mark=text("✦",23,ACCENT,true);mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);add(brandRow,mark,32,-2);TextView brand=text("LOOM / 密语",13,ACCENT,true);brand.setLetterSpacing(.14f);add(brandRow,brand,-2,-2);add(box,brandRow,-1,-2);gap(box,24);}
     private void note(LinearLayout box,String title,String body){LinearLayout card=column();card.setBackground(outlined(PANEL,18));pad(card,18,18,18,18);add(card,text(title,14,ACCENT,true),-1,-2);gap(card,8);add(card,text(body,14,MUTED,false),-1,-2);box.addView(card,margins(-1,-2,0,0,0,0));}
-    private void showGate(){gateGeneration++;master=null;entries=new JSONArray();list=null;search=null;surface();header(page);gap(page,20);add(page,text(store.exists()?"欢迎回来。":"给秘密一个\n安稳的地方。",32,TEXT,true),-1,-2);gap(page,12);add(page,text(pendingQuickAdd?"解锁后，即可安全添加一条新记录。":store.exists()?"输入主密码，开启你的私人保险库。":"像记笔记一样，保存重要账号。\n创建主密码，让秘密只以密文留在设备上。",16,MUTED,false),-1,-2);gap(page,28);
+    private void showGate(){gateGeneration++;if(biometricInFlight){biometricInFlight=false;BiometricUnlock.cancel(this);}master=null;entries=new JSONArray();list=null;search=null;surface();header(page);gap(page,20);add(page,text(store.exists()?"欢迎回来。":"给秘密一个\n安稳的地方。",32,TEXT,true),-1,-2);gap(page,12);add(page,text(pendingQuickAdd?"解锁后，即可安全添加一条新记录。":store.exists()?"可使用生物识别，也可输入主密码。":"创建主密码，让秘密只以密文留在设备上。",16,MUTED,false),-1,-2);gap(page,28);
         label(page,store.exists()?"主密码":"设置主密码 · 至少 10 位");EditText pass=field("输入主密码","",true);add(page,pass,-1,-2);gap(page,16);
-        TextView open=action(store.exists()?"解锁保险库  →":"创建保险库  →",true);add(page,open,-1,-2);pass.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);pass.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_DONE){if(open.isEnabled())open.performClick();return true;}return false;});
-        if(store.exists() && BiometricUnlock.isEnabled(this) && BiometricUnlock.isAvailable(this)){
-            gap(page,12);TextView biometric=action("◎  使用指纹 / 生物识别解锁",false);add(page,biometric,-1,-2);
-            biometric.setOnClickListener(v->unlockBiometric());
-        }
+        TextView open=action(store.exists()?"使用主密码解锁  →":"创建保险库  →",true);add(page,open,-1,-2);pass.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);pass.setOnEditorActionListener((v,id,event)->{if(id==android.view.inputmethod.EditorInfo.IME_ACTION_DONE){if(open.isEnabled())open.performClick();return true;}return false;});
+        if(store.exists()&&BiometricUnlock.isEnabled(this)&&BiometricUnlock.isAvailable(this)){gap(page,12);TextView biometric=action("◎  使用指纹 / 生物识别解锁",false);add(page,biometric,-1,-2);biometric.setOnClickListener(v->unlockBiometric());}
         open.setOnClickListener(v->{
             if(saving||VAULT_WRITE_BUSY.get()){toast("正在保存或恢复保险库，请稍候");return;}
-            String p=pass.getText().toString();boolean creating=!store.exists();
-            if(creating&&p.length()<10){pass.setError("主密码至少 10 位");return;}
-            if(p.isEmpty()){pass.setError("请输入主密码");return;}
+            String p=pass.getText().toString();boolean creating=!store.exists();if(creating&&p.length()<10){pass.setError("主密码至少 10 位");return;}if(p.isEmpty()){pass.setError("请输入主密码");return;}
             if(creating&&!VAULT_WRITE_BUSY.compareAndSet(false,true)){toast("保险库正在写入，请稍候");return;}
-            final int attempt=gateGeneration;
-            open.setEnabled(false);open.setAlpha(.65f);open.setText(creating?"正在创建保险库…":"正在安全解锁…");
-            try{io.execute(()->{
-                JSONObject data=null;Exception failure=null;
-                try{
-                    if(creating){
-                        if(store.exists())throw new IOException("保险库已存在，请重新解锁");
-                        data=new JSONObject().put("entries",new JSONArray());store.save(p,data);
-                    }else data=store.load(p);
-                }catch(Exception ex){failure=ex;}
-                finally{if(creating)VAULT_WRITE_BUSY.set(false);}
-                final JSONObject loaded=data;final Exception error=failure;
-                runOnUiThread(()->{
-                    if(isDestroyed()||attempt!=gateGeneration)return;
-                    if(error!=null){open.setEnabled(true);open.setAlpha(1f);open.setText("重试  →");pass.setError("密码不正确，或文件已损坏；若刚导入备份，请重新打开应用");return;}
-                    if(!foreground||saving||VAULT_WRITE_BUSY.get()||master!=null)return;
-                    JSONArray found=loaded.optJSONArray("entries");if(found==null){pass.setError("保险库格式无效");return;}
-                    BiometricUnlock.cancel(this);master=p;entries=found;pass.setText("");
-                    ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(pass.getWindowToken(),0);
-                    showHome("");openPendingAdd();
-                });
+            int attempt=gateGeneration;open.setEnabled(false);open.setAlpha(.65f);open.setText(creating?"正在创建保险库…":"正在安全解锁…");
+            try{io.execute(()->{JSONObject data=null;Exception failure=null;try{if(creating){if(store.exists())throw new IOException("保险库已存在");data=new JSONObject().put("entries",new JSONArray());store.save(p,data);}else data=store.load(p);}catch(Exception ex){failure=ex;}finally{if(creating)VAULT_WRITE_BUSY.set(false);}JSONObject loaded=data;Exception error=failure;
+                runOnUiThread(()->{if(isDestroyed()||attempt!=gateGeneration)return;if(error!=null){open.setEnabled(true);open.setAlpha(1f);open.setText("重试  →");pass.setError("主密码错误或保险库已变化，请重试");return;}if(!foreground||saving||VAULT_WRITE_BUSY.get()||master!=null)return;JSONArray found=loaded.optJSONArray("entries");if(found==null){pass.setError("保险库格式无效");return;}BiometricUnlock.cancel(this);biometricInFlight=false;master=p;entries=found;pass.setText("");((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(pass.getWindowToken(),0);showHome("");if(creating)offerBiometricAfterCreation();else openPendingAdd();});
             });}catch(RuntimeException ex){if(creating)VAULT_WRITE_BUSY.set(false);open.setEnabled(true);open.setAlpha(1f);toast("无法开始解锁，请重试");}
         });
-        gap(page,26);note(page,"本地加密 · 私密守护","主密码不上传，也不会存储在服务器。请妥善保存：忘记后无法找回历史内容。");gap(page,16);TextView recover=action("已有加密备份？导入文件",false);add(page,recover,-1,-2);recover.setOnClickListener(v->pickImport());gap(page,12);TextView account=action("换手机？从账号恢复",false);add(page,account,-1,-2);account.setOnClickListener(v->accountDialog(true));
+        gap(page,26);note(page,"本地加密 · 私密守护","主密码不上传，也不会存储在服务器。请妥善保存：忘记后无法找回历史内容。");gap(page,16);TextView recover=action("已有加密备份？导入文件",false);add(page,recover,-1,-2);recover.setOnClickListener(v->pickImport());gap(page,12);TextView account=action("换手机？从账号恢复",false);add(page,account,-1,-2);account.setOnClickListener(v->accountDialog(true));scheduleAutoBiometric();
     }
+    private void scheduleAutoBiometric(){if(!foreground||master!=null||autoBiometricAttempted||biometricInFlight||!store.exists()||!BiometricUnlock.isEnabled(this)||!BiometricUnlock.isAvailable(this))return;int generation=gateGeneration;if(autoBiometricScheduledGeneration==generation)return;autoBiometricScheduledGeneration=generation;main.postDelayed(()->{if(autoBiometricScheduledGeneration==generation)autoBiometricScheduledGeneration=-1;if(!foreground||isDestroyed()||master!=null||gateGeneration!=generation||autoBiometricAttempted)return;if(saving||VAULT_WRITE_BUSY.get()){main.postDelayed(()->{if(gateGeneration==generation)scheduleAutoBiometric();},500);return;}unlockBiometric();},350);}
+    private void offerBiometricAfterCreation(){
+        if(!foreground||master==null||getPreferences(0).getBoolean(BIO_OFFER_DONE,false)||!BiometricUnlock.isAvailable(this)){openPendingAdd();return;}
+        dialogBuilder().setTitle("以后用指纹解锁？").setMessage("这台手机可使用系统生物识别快捷解锁。主密码仍是换机恢复的必需凭据。")
+            .setNegativeButton("稍后",(d,w)->{getPreferences(0).edit().putBoolean(BIO_OFFER_DONE,true).apply();openPendingAdd();})
+            .setPositiveButton("启用",(d,w)->{getPreferences(0).edit().putBoolean(BIO_OFFER_DONE,true).apply();enrollBiometric();}).show();
+    }
+    private void enrollBiometric(){if(master==null||saving||VAULT_WRITE_BUSY.get()||BiometricUnlock.isEnabled(this)||!BiometricUnlock.isAvailable(this))return;String p=master;BiometricUnlock.enroll(this,p,new BiometricUnlock.Callback(){@Override public void onSuccess(String ignored){if(foreground&&!isDestroyed()){toast("已开启；以后会优先使用生物识别解锁");openPendingAdd();}}@Override public void onError(String message){if(foreground&&!isDestroyed()){toast("未能启用，请使用主密码；可在工具箱重试");openPendingAdd();}}});}
     private void unlockBiometric(){
-        if(!foreground||master!=null||!store.exists())return;if(saving||VAULT_WRITE_BUSY.get()){toast("正在保存或恢复保险库，请稍候");return;}
-        final int attempt=gateGeneration;
+        if(!foreground||master!=null||!store.exists()||biometricInFlight||saving||VAULT_WRITE_BUSY.get())return;
+        autoBiometricAttempted=true;biometricInFlight=true;int attempt=gateGeneration;
         BiometricUnlock.unlock(this,new BiometricUnlock.Callback(){
             @Override public void onSuccess(String passphrase){
                 if(!foreground||isDestroyed()||attempt!=gateGeneration)return;
-                io.execute(()->{try{
-                    JSONObject data=store.load(passphrase);JSONArray found=data.optJSONArray("entries");
-                    if(found==null)throw new IOException("保险库格式无效");
-                    runOnUiThread(()->{if(!foreground||isDestroyed()||attempt!=gateGeneration||saving||VAULT_WRITE_BUSY.get()||master!=null)return;master=passphrase;entries=found;showHome("");openPendingAdd();});
-                }catch(Exception ex){runOnUiThread(()->{if(foreground&&!isDestroyed()&&attempt==gateGeneration)toast("生物识别凭据已失效，请使用主密码解锁并重新设置");});}});
+                io.execute(()->{try{JSONObject data=store.load(passphrase);JSONArray found=data.optJSONArray("entries");if(found==null)throw new IOException("保险库格式无效");runOnUiThread(()->{if(!foreground||isDestroyed()||attempt!=gateGeneration||saving||VAULT_WRITE_BUSY.get()||master!=null)return;biometricInFlight=false;master=passphrase;entries=found;showHome("");openPendingAdd();});}catch(Exception ex){runOnUiThread(()->{if(foreground&&!isDestroyed()&&attempt==gateGeneration){biometricInFlight=false;toast("生物识别凭据已失效，请使用主密码解锁并重新设置");}});}});
             }
-            @Override public void onError(String message){if(foreground&&!isDestroyed()&&attempt==gateGeneration)toast("请使用主密码解锁，或检查系统生物识别设置");}
+            @Override public void onError(String message){if(foreground&&!isDestroyed()&&attempt==gateGeneration){biometricInFlight=false;toast("可输入主密码解锁，或手动点生物识别重试");}}
         });
     }
     private void biometricSettings(){
@@ -131,13 +112,7 @@ public class MainActivity extends Activity {
         dialogBuilder().setTitle("开启生物识别快捷解锁？")
             .setMessage("将主密码用此设备的 Android Keystore 加密保存，仅在通过系统生物识别后才能用于解锁。换机与恢复仍需记住主密码。")
             .setNegativeButton("取消",null)
-            .setPositiveButton("继续",(d,w)->{
-                if(master==null||!master.equals(unlockedMaster))return;
-                BiometricUnlock.enroll(this,unlockedMaster,new BiometricUnlock.Callback(){
-                    @Override public void onSuccess(String ignored){if(foreground&&!isDestroyed())toast("已开启；下次解锁可使用生物识别");}
-                    @Override public void onError(String message){if(foreground&&!isDestroyed())toast("未开启生物识别，请检查系统设置或重试");}
-                });
-            }).show();
+            .setPositiveButton("继续",(d,w)->{if(master!=null&&master.equals(unlockedMaster))enrollBiometric();}).show();
     }
     private void showHome(String query){surface();header(page);LinearLayout hero=column();hero.setBackground(outlined(PANEL,24));pad(hero,22,22,22,22);add(hero,text("私人保险库",13,ACCENT,true),-1,-2);gap(hero,8);add(hero,text("安心收藏，随时取用。",26,TEXT,true),-1,-2);gap(hero,12);add(hero,text("本地加密保护  ·  "+entries.length()+" 条记录",14,MUTED,false),-1,-2);page.addView(hero,margins(-1,-2,0,0,0,0));gap(page,20);
         LinearLayout buttons=row();TextView addButton=action("＋  新建记录",true),more=action("工具箱",false);buttons.addView(addButton,new LinearLayout.LayoutParams(0,-2,1.5f));LinearLayout.LayoutParams toolsParams=new LinearLayout.LayoutParams(0,-2,1);toolsParams.setMarginStart(dp(12));buttons.addView(more,toolsParams);add(page,buttons,-1,-2);addButton.setOnClickListener(v->editDialog(-1));more.setOnClickListener(v->tools());gap(page,28);
@@ -148,7 +123,7 @@ public class MainActivity extends Activity {
     private void detail(int index){if(master==null)return;JSONObject obj=entries.optJSONObject(index);if(obj==null)return;surface();TextView back=action("←  返回保险库",false);add(page,back,-1,-2);back.setOnClickListener(v->showHome(""));gap(page,24);add(page,text(display(obj,"category","其他"),13,ACCENT,true),-1,-2);gap(page,8);add(page,text(display(obj,"title","未命名记录"),30,TEXT,true),-1,-2);gap(page,24);
         item("账号",obj.optString("username"),true,false);item("密码",obj.optString("password"),true,true);item("网址 / 应用",obj.optString("url"),false,false);item("备注",obj.optString("notes"),false,false);gap(page,12);TextView edit=action("编辑记录",true);add(page,edit,-1,-2);edit.setOnClickListener(v->editDialog(index));gap(page,12);TextView del=action("删除记录",false);del.setTextColor(WARM);add(page,del,-1,-2);del.setOnClickListener(v->dialogBuilder().setTitle("删除这条记录？").setMessage("删除后会保存到本地保险库；如已登录，同步时也将删除云端副本。此操作不可撤销。").setNegativeButton("取消",null).setPositiveButton("删除",(d,w)->{JSONArray next=new JSONArray();for(int i=0;i<entries.length();i++)if(i!=index)next.put(entries.optJSONObject(i));commit(next,()->showHome(""));}).show());}
     private void item(String heading,String value,boolean canCopy,boolean secret){LinearLayout card=column();card.setBackground(outlined(PANEL,18));pad(card,18,16,18,16);add(card,text(heading,13,MUTED,true),-1,-2);gap(card,10);TextView content=text(value.isEmpty()?"未填写":secret?"••••••••••••":value,17,value.isEmpty()?MUTED:TEXT,false);content.setTextIsSelectable(!secret);if(secret)content.setTypeface(Typeface.MONOSPACE);add(card,content,-1,-2);if(!value.isEmpty()&&(secret||canCopy)){gap(card,12);LinearLayout controls=row();if(secret){final boolean[] visible={false};TextView reveal=action("显示密码",false);add(controls,reveal,-2,-2);reveal.setOnClickListener(v->{if(master==null)return;visible[0]=!visible[0];content.setText(visible[0]?value:"••••••••••••");reveal.setText(visible[0]?"隐藏密码":"显示密码");});}if(canCopy){TextView copy=action("复制"+heading,false);controls.addView(copy,margins(-2,-2,secret?8:0,0,0,0));copy.setOnClickListener(v->{if(master!=null)copy(value,secret);});}add(card,controls,-1,-2);}page.addView(card,margins(-1,-2,0,0,0,12));}
-    private void copy(String value,boolean secret){android.content.ClipboardManager cb=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);cb.setPrimaryClip(ClipData.newPlainText(secret?"密码":"账号",value));toast("已复制，60 秒后尝试清除剪贴板");main.postDelayed(()->{if(cb.hasPrimaryClip() && cb.getPrimaryClip().getItemCount()>0 && value.equals(cb.getPrimaryClip().getItemAt(0).coerceToText(this).toString()))cb.setPrimaryClip(ClipData.newPlainText("",""));},60000);}
+    private void copy(String value,boolean secret){android.content.ClipboardManager cb=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);ClipData clip=ClipData.newPlainText(secret?"密码":"账号",value);if(secret){android.os.PersistableBundle flags=new android.os.PersistableBundle();flags.putBoolean("android.content.extra.IS_SENSITIVE",true);clip.getDescription().setExtras(flags);}cb.setPrimaryClip(clip);toast("已复制，60 秒后尝试清除剪贴板");main.postDelayed(()->{try{if(cb.hasPrimaryClip()&&cb.getPrimaryClip().getItemCount()>0&&value.equals(cb.getPrimaryClip().getItemAt(0).coerceToText(this).toString()))cb.setPrimaryClip(ClipData.newPlainText("",""));}catch(RuntimeException ignored){}},60000);}
     private void editDialog(int index){
         if(master==null){pendingQuickAdd=index<0;showGate();return;}
         if(saving){toast("请等待上一条记录保存完成");return;}
@@ -187,7 +162,19 @@ public class MainActivity extends Activity {
                 inputs[i].setSingleLine(false);inputs[i].setMinLines(3);inputs[i].setGravity(Gravity.TOP);
                 inputs[i].setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI|android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
             }
-            add(parent,inputs[i],-1,-2);gap(parent,12);
+            if(i==1){
+                LinearLayout passwordRow=row();passwordRow.addView(inputs[i],new LinearLayout.LayoutParams(0,-2,1));
+                TextView visibility=action("显示",false);visibility.setContentDescription("显示密码输入");
+                passwordRow.addView(visibility,margins(76,52,8,0,0,0));
+                visibility.setOnClickListener(v->{
+                    boolean showing=inputs[1].getTransformationMethod() instanceof android.text.method.HideReturnsTransformationMethod;
+                    int start=inputs[1].getSelectionStart(),end=inputs[1].getSelectionEnd();
+                    inputs[1].setTransformationMethod(showing?android.text.method.PasswordTransformationMethod.getInstance():android.text.method.HideReturnsTransformationMethod.getInstance());
+                    inputs[1].setSelection(Math.max(0,start),Math.max(0,end));
+                    visibility.setText(showing?"显示":"隐藏");visibility.setContentDescription(showing?"显示密码输入":"隐藏密码输入");
+                });
+                add(parent,passwordRow,-1,-2);gap(parent,12);
+            }else{add(parent,inputs[i],-1,-2);gap(parent,12);}
         }
         inputs[0].setNextFocusForwardId(inputs[1].getId());inputs[1].setNextFocusForwardId(inputs[2].getId());
         inputs[3].setNextFocusForwardId(inputs[4].getId());
@@ -239,8 +226,8 @@ public class MainActivity extends Activity {
             dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
         }
     }
-    private void commit(JSONArray next,Runnable after){String current=master;if(current==null||saving||!VAULT_WRITE_BUSY.compareAndSet(false,true)){toast("请先解锁或等待保存完成");return;}saving=true;try{io.execute(()->{try{store.save(current,new JSONObject().put("entries",next));runOnUiThread(()->{if(isDestroyed())return;saving=false;dirty=true;if(master!=null&&master.equals(current)){entries=next;after.run();toast("已加密保存到本机");if(token!=null&&!reconciliationPending)sync(false);}});}catch(Exception e){runOnUiThread(()->{if(isDestroyed())return;saving=false;toast("保存失败："+e.getMessage());});}finally{VAULT_WRITE_BUSY.set(false);}});}catch(RuntimeException e){saving=false;VAULT_WRITE_BUSY.set(false);toast("无法开始保存，请重试");}}
-    private void tools(){String state=token==null?"未登录":"已登录 · 可同步";String bio=BiometricUnlock.isEnabled(this)?"◎  关闭生物识别解锁":"◎  开启生物识别解锁";dialogBuilder().setTitle("工具箱  /  " +state).setItems(new String[]{bio,"☁  登录 / 注册与同步","↻  立即同步","⇧  导出加密备份","⇩  导入加密备份","◯  锁定保险库"},(d,which)->{switch(which){case 0:biometricSettings();break;case 1:accountDialog(false);break;case 2:sync(true);break;case 3:exportFile();break;case 4:pickImport();break;case 5:token=null;master=null;showGate();break;}}).show();}
+    private void commit(JSONArray next,Runnable after){String current=master;if(current==null||saving||!VAULT_WRITE_BUSY.compareAndSet(false,true)){toast("请先解锁或等待保存完成");return;}saving=true;try{io.execute(()->{try{store.save(current,new JSONObject().put("entries",next));runOnUiThread(()->{if(isDestroyed())return;saving=false;dirty=true;if(master!=null&&master.equals(current)){entries=next;after.run();toast("已加密保存到本机");openPendingAdd();if(token!=null&&!reconciliationPending)sync(false);}});}catch(Exception e){runOnUiThread(()->{if(isDestroyed())return;saving=false;toast("保存失败："+e.getMessage());});}finally{VAULT_WRITE_BUSY.set(false);}});}catch(RuntimeException e){saving=false;VAULT_WRITE_BUSY.set(false);toast("无法开始保存，请重试");}}
+    private void tools(){String state=token==null?"未登录":"已登录 · 可同步";String bio=BiometricUnlock.isEnabled(this)?"◎  关闭生物识别解锁":"◎  开启生物识别解锁";dialogBuilder().setTitle("工具箱  /  " +state).setItems(new String[]{bio,"☁  登录 / 注册与同步","↻  立即同步","⇧  导出加密备份","⇩  导入加密备份","◯  锁定保险库"},(d,which)->{switch(which){case 0:biometricSettings();break;case 1:accountDialog(false);break;case 2:sync(true);break;case 3:exportFile();break;case 4:pickImport();break;case 5:token=null;master=null;autoBiometricAttempted=false;showGate();break;}}).show();}
     private void accountDialog(boolean recovery){if(!foreground||isDestroyed())return;LinearLayout form=column();pad(form,20,8,20,4);label(form,"服务器地址（生产环境必须 HTTPS）");EditText url=field("https://your-server.example",getPreferences(0).getString("serverUrl",""),false);add(form,url,-1,50);gap(form,13);label(form,"账号");EditText user=field("输入用户名","",false);add(form,user,-1,50);gap(form,13);label(form,"登录密码（不是主密码）");EditText pass=field("输入登录密码","",true);add(form,pass,-1,50);gap(form,15);add(form,text("登录密码用于身份验证；主密码只用于解密，服务器无法读取内容。",12,MUTED,false),-1,-2);ScrollView scroll=new ScrollView(this);scroll.addView(form);dialogBuilder().setTitle(recovery?"从账号恢复":"账号与云同步").setView(scroll).setNegativeButton("取消",null).setNeutralButton("注册",(d,w)->authenticate(url.getText().toString(),user.getText().toString(),pass.getText().toString(),true,recovery)).setPositiveButton("登录",(d,w)->authenticate(url.getText().toString(),user.getText().toString(),pass.getText().toString(),false,recovery)).show();}
     private void authenticate(String url,String user,String password,boolean register,boolean recovery){if(user.trim().length()<3||password.getBytes(StandardCharsets.UTF_8).length<8){toast("账号至少 3 位，登录密码至少 8 字节");return;}getPreferences(0).edit().putString("serverUrl",url.trim()).apply();io.execute(()->{try{SyncClient client=new SyncClient(url.trim());JSONObject res=register?client.register(user.trim(),password):client.login(user.trim(),password);String t=res.getString("token");int rev=res.optInt("revision");String remote=res.optString("vault","");String local=store.exists()?store.exportEnvelope():"";runOnUiThread(()->{if(!foreground||isDestroyed())return;token=t;serverUrl=url.trim();revision=rev;boolean hasRemote=!remote.isEmpty()&&!remote.equals("null");reconciliationPending=hasRemote&&!remote.equals(local);if(!hasRemote){toast("账号已连接；解锁后同步本机密文");if(master!=null)sync(false);else showGate();}else if(remote.equals(local)){reconciliationPending=false;toast("云端与本机一致，已连接");if(master==null)showGate();}else if(master==null || recovery || local.isEmpty()){askRestore(remote,rev);}else{dialogBuilder().setTitle("云端已有保险库").setMessage("请选择保留哪份数据。未选择之前不会自动上传。建议先导出本机备份。") .setNegativeButton("稍后处理",null).setNeutralButton("下载云端",(d,w)->askRestore(remote,rev)).setPositiveButton("上传本机",(d,w)->uploadCurrent(rev)).show();}});}catch(Exception e){runOnUiThread(()->{if(foreground&&!isDestroyed())toast("连接失败："+e.getMessage());});}});}
     private void askRestore(String remote,int rev){if(!foreground||isDestroyed())return;EditText pass=field("云端保险库的主密码","",true);dialogBuilder().setTitle("验证并恢复云端保险库").setMessage("请先确认主密码。验证成功后才会替换本机内容；替换前的加密副本保存在应用内部。") .setView(pass).setNegativeButton("取消",null).setPositiveButton("验证并恢复",(d,w)->replaceEnvelope(remote,pass.getText().toString(),rev)).show();}
