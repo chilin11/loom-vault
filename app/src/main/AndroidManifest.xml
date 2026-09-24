@@ -4,6 +4,8 @@
     <application
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:label="Loom · 密语"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false"
         android:allowBackup="false"
         android:supportsRtl="true">

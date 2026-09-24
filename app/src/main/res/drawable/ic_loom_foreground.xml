@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two interwoven, rounded L-shaped ribbons. All artwork stays within the
+     adaptive icon's central 66dp safe circle (108dp viewport).
+     Explicit 2dp crossing gaps survive masking and need no background paint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Sage warp: the upright and foot form Loom's L monogram. -->
+    <path
+        android:fillColor="#C5E8A5"
+        android:pathData="M38,30 A4,4 0,0 1,46 30 L46,60 Q46,62 48,62 L60,62 L60,70 L48,70 C42.477,70 38,65.523 38,60 Z" />
+    <!-- The foot emerges beyond the second ribbon's overpass. -->
+    <path
+        android:fillColor="#C5E8A5"
+        android:pathData="M72,62 L78,62 A4,4 0,0 1,78 70 L72,70 Z" />
+    <!-- Eucalyptus weft: a quarter-turned partner, over then under. -->
+    <path
+        android:fillColor="#729E8E"
+        android:pathData="M48,38 L60,38 C65.523,38 70,42.477 70,48 L70,78 A4,4 0,0 1,62 78 L62,48 Q62,46 60,46 L48,46 Z" />
+    <path
+        android:fillColor="#729E8E"
+        android:pathData="M30,38 L36,38 L36,46 L30,46 A4,4 0,0 1,30 38 Z" />
+</vector>
